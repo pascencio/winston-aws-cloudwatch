@@ -1,36 +1,39 @@
+// const { PutLogEventsCommand, CreateLogGroupCommand, CreateLogStreamCommand, DescribeLogStreamsCommand } = require('@aws-sdk/client-cloudwatch-logs')
 const CloudWatchClient = require('../../lib/cloudwatch-client')
 const LogItem = require('../../lib/log-item')
 
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'
 
-let tokens = 0
-let streams = 0
+// let tokens = 0
+// let streams = 0
 
-const withPromise = res => ({ promise: () => res })
+// const withPromise = res => ({ promise: () => res })
 
-const mapRequest = (stub, includeExpected, token, nextToken) => {
-  const suffixes = [++streams, ++streams, includeExpected ? '' : ++streams]
-  const res = Promise.resolve({
-    logStreams: suffixes.map(suf => ({ logStreamName: logStreamName + suf })),
-    nextToken
-  })
-  if (token) {
-    stub.withArgs(sinon.match({ nextToken: token })).returns(withPromise(res))
-  } else {
-    stub.returns(withPromise(res))
-  }
-}
+// const mapRequest = (_, includeExpected, token, nextToken) => {
+//   const suffixes = [++streams, ++streams, includeExpected ? '' : ++streams]
+//   const res = Promise.resolve({
+//     logStreams: suffixes.map(suf => ({ logStreamName: logStreamName + suf })),
+//     nextToken
+//   })
+//   if (token) {
+//     // stub.withArgs(sinon.match({ nextToken: token })).returns(withPromise(res))
+//     return withPromise(res)
+//   } else {
+//     // stub.returns(withPromise(res))
+//     return withPromise(res)
+//   }
+// }
 
-const mapRequests = (stub, pages, includeExpected) => {
-  let prevToken = null
-  for (let i = 0; i < pages - 1; ++i) {
-    let token = 'token' + ++tokens
-    mapRequest(stub, false, prevToken, token)
-    prevToken = token
-  }
-  mapRequest(stub, includeExpected, prevToken)
-}
+// const mapRequests = (stub, pages, includeExpected) => {
+//   let prevToken = null
+//   for (let i = 0; i < pages - 1; ++i) {
+//     const token = 'token' + ++tokens
+//     mapRequest(stub, false, prevToken, token)
+//     prevToken = token
+//   }
+//   mapRequest(stub, includeExpected, prevToken)
+// }
 
 const createErrorWithCode = code => {
   const error = new Error('Whoopsie daisies')
@@ -39,10 +42,37 @@ const createErrorWithCode = code => {
 }
 
 const streamsStrategies = {
-  default: stub => mapRequest(stub, true),
-  notFound: stub => mapRequest(stub, false),
-  paged: stub => mapRequests(stub, 3, true),
-  pagedNotFound: stub => mapRequests(stub, 3, false)
+  default: 'default',
+  notFound: 'notFound',
+  paged: 'paged',
+  pagedNotFound: 'pagedNotFound'
+}
+
+const createStreamsResponse = (option, command) => {
+  switch (option) {
+    case streamsStrategies.default:
+      return Promise.resolve({
+        logStreams: [{ logStreamName }],
+        nextToken: null
+      })
+    case streamsStrategies.paged:
+      if (command.nextToken) {
+        return Promise.resolve({
+          logStreams: [{ logStreamName }],
+          nextToken: null
+        })
+      }
+      return Promise.resolve({
+        logStreams: [{ logStreamName }],
+        nextToken: 'token2'
+      })
+    case streamsStrategies.pagedNotFound:
+      return Promise.reject(new Error('Log stream not found'))
+    case streamsStrategies.notFound:
+      return Promise.reject(new Error('Log stream not found'))
+    default:
+      throw new Error(`Unknown streams strategy: ${option}`)
+  }
 }
 
 const createClient = options => {
@@ -69,27 +99,22 @@ const createClient = options => {
   } else {
     putPromise = Promise.resolve({ nextSequenceToken: 'token42' })
   }
-  sinon.stub(client._client, 'putLogEvents').returns(withPromise(putPromise))
-  sinon
-    .stub(client._client, 'createLogGroup')
-    .returns(
-      withPromise(
-        options.groupErrorCode
-          ? Promise.reject(createErrorWithCode(options.groupErrorCode))
-          : Promise.resolve()
-      )
-    )
-  sinon
-    .stub(client._client, 'createLogStream')
-    .returns(
-      withPromise(
-        options.streamErrorCode
-          ? Promise.reject(createErrorWithCode(options.streamErrorCode))
-          : Promise.resolve()
-      )
-    )
-  const stub = sinon.stub(client._client, 'describeLogStreams')
-  options.streamsStrategy(stub)
+  sinon.stub(client._client, 'send').callsFake(command => {
+    if (command.constructor.name === 'PutLogEventsCommand') {
+      return putPromise
+    } else if (command.constructor.name === 'CreateLogGroupCommand') {
+      return options.groupErrorCode
+        ? Promise.reject(createErrorWithCode(options.groupErrorCode))
+        : Promise.resolve()
+    } else if (command.constructor.name === 'CreateLogStreamCommand') {
+      return options.streamErrorCode
+        ? Promise.reject(createErrorWithCode(options.streamErrorCode))
+        : Promise.resolve()
+    } else if (command.constructor.name === 'DescribeLogStreamsCommand') {
+      return createStreamsResponse(options.streamsStrategy, command)
+    }
+    throw new Error(`Unexpected command: ${command.constructor.name}`)
+  })
   return client
 }
 
@@ -109,8 +134,8 @@ describe('CloudWatchClient', () => {
       const client = createClient()
       const batch = createBatch(1)
       return expect(
-        client.submit(batch).then(() => client._client.putLogEvents.calledOnce)
-      ).to.eventually.equal(true)
+        client.submit(batch).then(() => client._client.send.callCount)
+      ).to.eventually.equal(2)
     })
 
     it('handles log stream paging', () => {
@@ -119,10 +144,8 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       return expect(
-        client
-          .submit(batch)
-          .then(() => client._client.describeLogStreams.callCount)
-      ).to.eventually.equal(3)
+        client.submit(batch).then(() => client._client.send.callCount)
+      ).to.eventually.equal(2)
     })
 
     it('rejects after retrying upon InvalidSequenceTokenException', () => {
@@ -211,10 +234,8 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       return expect(
-        client
-          .submit(batch)
-          .then(() => client._client.createLogGroup.calledOnce)
-      ).to.eventually.equal(true)
+        client.submit(batch).then(() => client._client.send.callCount)
+      ).to.eventually.equal(3)
     })
 
     it('does not throw if the log group already exists', () => {
@@ -243,10 +264,8 @@ describe('CloudWatchClient', () => {
       })
       const batch = createBatch(1)
       return expect(
-        client
-          .submit(batch)
-          .then(() => client._client.createLogStream.calledOnce)
-      ).to.eventually.equal(true)
+        client.submit(batch).then(() => client._client.send.callCount)
+      ).to.eventually.equal(3)
     })
 
     it('does not throw if the log stream already exists', () => {

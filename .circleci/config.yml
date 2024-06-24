@@ -1,9 +1,9 @@
 version: 2.0
 
 jobs:
-  node-8:
+  node-22:
     docker:
-      - image: circleci/node:8-stretch
+      - image: cimg/node:22.3.0
     working_directory: ~/code
     steps:
       - run:
@@ -15,7 +15,7 @@ jobs:
             echo "deb https://dl.yarnpkg.com/debian/ stable main" | sudo tee /etc/apt/sources.list.d/yarn.list
             sudo apt-get update
             sudo rm -f /usr/local/bin/yarn
-            sudo apt-get install --no-install-recommends yarn=1.9.4-1
+            sudo apt-get install --no-install-recommends yarn=1.22.22-1
       - run:
           name: Create test result directory
           command: mkdir -p /tmp/test-results/unit
@@ -37,14 +37,12 @@ jobs:
             MOCHA_FILE: /tmp/test-results/unit/report.xml
       - store_test_results:
           path: /tmp/test-results
-          when: always
       - store_artifacts:
           path: /tmp/test-results
           destination: test-results
-          when: always
 
 workflows:
   version: 2
   build:
     jobs:
-      - node-8
+      - node-22
