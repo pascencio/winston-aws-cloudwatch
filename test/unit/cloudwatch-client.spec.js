@@ -5,36 +5,6 @@ const LogItem = require('../../lib/log-item')
 const logGroupName = 'testGroup'
 const logStreamName = 'testStream'
 
-// let tokens = 0
-// let streams = 0
-
-// const withPromise = res => ({ promise: () => res })
-
-// const mapRequest = (_, includeExpected, token, nextToken) => {
-//   const suffixes = [++streams, ++streams, includeExpected ? '' : ++streams]
-//   const res = Promise.resolve({
-//     logStreams: suffixes.map(suf => ({ logStreamName: logStreamName + suf })),
-//     nextToken
-//   })
-//   if (token) {
-//     // stub.withArgs(sinon.match({ nextToken: token })).returns(withPromise(res))
-//     return withPromise(res)
-//   } else {
-//     // stub.returns(withPromise(res))
-//     return withPromise(res)
-//   }
-// }
-
-// const mapRequests = (stub, pages, includeExpected) => {
-//   let prevToken = null
-//   for (let i = 0; i < pages - 1; ++i) {
-//     const token = 'token' + ++tokens
-//     mapRequest(stub, false, prevToken, token)
-//     prevToken = token
-//   }
-//   mapRequest(stub, includeExpected, prevToken)
-// }
-
 const createErrorWithCode = code => {
   const error = new Error('Whoopsie daisies')
   error.code = code
